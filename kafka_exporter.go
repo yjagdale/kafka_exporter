@@ -80,6 +80,7 @@ type Exporter struct {
 	sgWaitCh                chan struct{}
 	sgChans                 []chan<- prometheus.Metric
 	consumerGroupFetchAll   bool
+	skipEmptyConsumerGroups bool
 }
 
 type kafkaOpts struct {
@@ -117,6 +118,7 @@ type kafkaOpts struct {
 	allowConcurrent          bool
 	allowAutoTopicCreation   bool
 	verbosityLogLevel        int
+	skipEmptyConsumerGroups  bool
 }
 
 type MSKAccessTokenProvider struct {
@@ -300,6 +302,7 @@ func NewExporter(opts kafkaOpts, topicFilter string, topicExclude string, groupF
 		sgWaitCh:                nil,
 		sgChans:                 []chan<- prometheus.Metric{},
 		consumerGroupFetchAll:   config.Version.IsAtLeast(sarama.V2_0_0_0),
+		skipEmptyConsumerGroups: opts.skipEmptyConsumerGroups,
 	}, nil
 }
 
@@ -592,6 +595,13 @@ func (e *Exporter) collect(ch chan<- prometheus.Metric) {
 				klog.Errorf("Cannot describe for the group %s with error code %d", group.GroupId, group.Err)
 				continue
 			}
+
+			// Skip empty consumer groups if configured
+			if e.skipEmptyConsumerGroups && len(group.Members) == 0 {
+				klog.V(DEBUG).Infof("Skipping empty consumer group: %s", group.GroupId)
+				continue
+			}
+
 			offsetFetchRequest := sarama.OffsetFetchRequest{ConsumerGroup: group.GroupId, Version: e.fetchOffsetVersion()}
 			if e.offsetShowAll {
 				for topic, partitions := range offset {
@@ -617,14 +627,35 @@ func (e *Exporter) collect(ch chan<- prometheus.Metric) {
 					}
 				}
 			}
-			ch <- prometheus.MustNewConstMetric(
-				consumergroupMembers, prometheus.GaugeValue, float64(len(group.Members)), group.GroupId,
-			)
 			offsetFetchResponse, err := broker.FetchOffset(&offsetFetchRequest)
 			if err != nil {
 				klog.Errorf("Cannot get offset of group %s: %v", group.GroupId, err)
 				continue
 			}
+
+			// Check if consumer group has any valid topic assignments when skipEmptyConsumerGroups is enabled
+			if e.skipEmptyConsumerGroups {
+				hasValidTopics := false
+				for _, partitions := range offsetFetchResponse.Blocks {
+					for _, offsetFetchResponseBlock := range partitions {
+						if offsetFetchResponseBlock.Offset != -1 {
+							hasValidTopics = true
+							break
+						}
+					}
+					if hasValidTopics {
+						break
+					}
+				}
+				if !hasValidTopics {
+					klog.V(DEBUG).Infof("Skipping consumer group with no topic assignments: %s", group.GroupId)
+					continue
+				}
+			}
+
+			ch <- prometheus.MustNewConstMetric(
+				consumergroupMembers, prometheus.GaugeValue, float64(len(group.Members)), group.GroupId,
+			)
 
 			for topic, partitions := range offsetFetchResponse.Blocks {
 				// If the topic is not consumed by that consumer group, skip it
@@ -801,6 +832,7 @@ func main() {
 	toFlagIntVar("topic.workers", "Number of topic workers", 100, "100", &opts.topicWorkers)
 	toFlagBoolVar("kafka.allow-auto-topic-creation", "If true, the broker may auto-create topics that we requested which do not already exist, default is false.", false, "false", &opts.allowAutoTopicCreation)
 	toFlagIntVar("verbosity", "Verbosity log level", 0, "0", &opts.verbosityLogLevel)
+	toFlagBoolVar("skip.empty-consumer-groups", "If true, do not scrape consumer groups that are empty or not connected to any topics, default is true", true, "true", &opts.skipEmptyConsumerGroups)
 
 	plConfig := plog.Config{}
 	plogflag.AddFlags(kingpin.CommandLine, &plConfig)
