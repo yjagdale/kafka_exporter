@@ -107,7 +107,7 @@ func TestExporterSkipEmptyConsumerGroupsField(t *testing.T) {
 
 			// Note: This test will fail if Kafka is not available, but it tests
 			// that the skipEmptyConsumerGroups field is properly passed through
-			exporter, err := NewExporter(opts, ".*", "^$", ".*", "^$")
+			exporter, err := NewExporter(opts, ".*", "^$", ".*", "^$", ".*", "^$")
 			if err != nil {
 				t.Logf("Cannot create exporter (Kafka may not be available): %v", err)
 				// We still want to verify the struct would be initialized correctly

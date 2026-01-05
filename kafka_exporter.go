@@ -68,6 +68,8 @@ type Exporter struct {
 	topicExclude            *regexp.Regexp
 	groupFilter             *regexp.Regexp
 	groupExclude            *regexp.Regexp
+	groupTopicFilter        *regexp.Regexp
+	groupTopicExclude       *regexp.Regexp
 	mu                      sync.Mutex
 	useZooKeeperLag         bool
 	zookeeperClient         *kazoo.Kazoo
@@ -119,6 +121,8 @@ type kafkaOpts struct {
 	allowAutoTopicCreation   bool
 	verbosityLogLevel        int
 	skipEmptyConsumerGroups  bool
+	groupTopicFilter         string
+	groupTopicExclude        string
 }
 
 type MSKAccessTokenProvider struct {
@@ -165,7 +169,7 @@ func canReadFile(path string) bool {
 }
 
 // NewExporter returns an initialized Exporter.
-func NewExporter(opts kafkaOpts, topicFilter string, topicExclude string, groupFilter string, groupExclude string) (*Exporter, error) {
+func NewExporter(opts kafkaOpts, topicFilter string, topicExclude string, groupFilter string, groupExclude string, groupTopicFilter string, groupTopicExclude string) (*Exporter, error) {
 	var zookeeperClient *kazoo.Kazoo
 	config := sarama.NewConfig()
 	config.ClientID = clientID
@@ -291,6 +295,8 @@ func NewExporter(opts kafkaOpts, topicFilter string, topicExclude string, groupF
 		topicExclude:            regexp.MustCompile(topicExclude),
 		groupFilter:             regexp.MustCompile(groupFilter),
 		groupExclude:            regexp.MustCompile(groupExclude),
+		groupTopicFilter:        regexp.MustCompile(groupTopicFilter),
+		groupTopicExclude:       regexp.MustCompile(groupTopicExclude),
 		useZooKeeperLag:         opts.useZooKeeperLag,
 		zookeeperClient:         zookeeperClient,
 		nextMetadataRefresh:     time.Now(),
@@ -633,6 +639,32 @@ func (e *Exporter) collect(ch chan<- prometheus.Metric) {
 				continue
 			}
 
+			// Check if consumer group should be skipped based on topic filters
+			shouldSkipGroup := false
+			hasMatchingTopic := false
+			for topic := range offsetFetchResponse.Blocks {
+				// Check if topic matches the group-topic-filter
+				if e.groupTopicFilter.MatchString(topic) {
+					hasMatchingTopic = true
+				}
+				// Check if topic matches the group-topic-exclude
+				if e.groupTopicExclude.MatchString(topic) {
+					klog.V(DEBUG).Infof("Skipping consumer group %s because it consumes excluded topic: %s", group.GroupId, topic)
+					shouldSkipGroup = true
+					break
+				}
+			}
+
+			// If group-topic-filter is set (not empty ".*") and no topics matched, skip the group
+			if e.groupTopicFilter.String() != ".*" && !hasMatchingTopic {
+				klog.V(DEBUG).Infof("Skipping consumer group %s because it doesn't consume any filtered topics", group.GroupId)
+				shouldSkipGroup = true
+			}
+
+			if shouldSkipGroup {
+				continue
+			}
+
 			// Check if consumer group has any valid topic assignments when skipEmptyConsumerGroups is enabled
 			if e.skipEmptyConsumerGroups {
 				hasValidTopics := false
@@ -787,13 +819,15 @@ func toFlagIntVar(name string, help string, value int, valueString string, targe
 
 func main() {
 	var (
-		listenAddress = toFlagString("web.listen-address", "Address to listen on for web interface and telemetry.", ":9308")
-		metricsPath   = toFlagString("web.telemetry-path", "Path under which to expose metrics.", "/metrics")
-		topicFilter   = toFlagString("topic.filter", "Regex that determines which topics to collect.", ".*")
-		topicExclude  = toFlagString("topic.exclude", "Regex that determines which topics to exclude.", "^$")
-		groupFilter   = toFlagString("group.filter", "Regex that determines which consumer groups to collect.", ".*")
-		groupExclude  = toFlagString("group.exclude", "Regex that determines which consumer groups to exclude.", "^$")
-		logSarama     = toFlagBool("log.enable-sarama", "Turn on Sarama logging, default is false.", false, "false")
+		listenAddress     = toFlagString("web.listen-address", "Address to listen on for web interface and telemetry.", ":9308")
+		metricsPath       = toFlagString("web.telemetry-path", "Path under which to expose metrics.", "/metrics")
+		topicFilter       = toFlagString("topic.filter", "Regex that determines which topics to collect.", ".*")
+		topicExclude      = toFlagString("topic.exclude", "Regex that determines which topics to exclude.", "^$")
+		groupFilter       = toFlagString("group.filter", "Regex that determines which consumer groups to collect.", ".*")
+		groupExclude      = toFlagString("group.exclude", "Regex that determines which consumer groups to exclude.", "^$")
+		groupTopicFilter  = toFlagString("group-topic.filter", "Regex that determines consumer groups to collect based on topics they consume.", ".*")
+		groupTopicExclude = toFlagString("group-topic.exclude", "Regex that determines consumer groups to exclude based on topics they consume.", "^$")
+		logSarama         = toFlagBool("log.enable-sarama", "Turn on Sarama logging, default is false.", false, "false")
 
 		opts = kafkaOpts{}
 	)
@@ -852,7 +886,7 @@ func main() {
 		}
 	}
 
-	setup(*listenAddress, *metricsPath, *topicFilter, *topicExclude, *groupFilter, *groupExclude, *logSarama, opts, labels)
+	setup(*listenAddress, *metricsPath, *topicFilter, *topicExclude, *groupFilter, *groupExclude, *groupTopicFilter, *groupTopicExclude, *logSarama, opts, labels)
 }
 
 func setup(
@@ -862,6 +896,8 @@ func setup(
 	topicExclude string,
 	groupFilter string,
 	groupExclude string,
+	groupTopicFilter string,
+	groupTopicExclude string,
 	logSarama bool,
 	opts kafkaOpts,
 	labels map[string]string,
@@ -975,7 +1011,7 @@ func setup(
 		sarama.Logger = log.New(os.Stdout, "[sarama] ", log.LstdFlags)
 	}
 
-	exporter, err := NewExporter(opts, topicFilter, topicExclude, groupFilter, groupExclude)
+	exporter, err := NewExporter(opts, topicFilter, topicExclude, groupFilter, groupExclude, groupTopicFilter, groupTopicExclude)
 	if err != nil {
 		klog.Fatalln(err)
 	}
