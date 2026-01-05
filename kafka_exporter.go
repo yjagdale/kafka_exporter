@@ -819,15 +819,13 @@ func toFlagIntVar(name string, help string, value int, valueString string, targe
 
 func main() {
 	var (
-		listenAddress     = toFlagString("web.listen-address", "Address to listen on for web interface and telemetry.", ":9308")
-		metricsPath       = toFlagString("web.telemetry-path", "Path under which to expose metrics.", "/metrics")
-		topicFilter       = toFlagString("topic.filter", "Regex that determines which topics to collect.", ".*")
-		topicExclude      = toFlagString("topic.exclude", "Regex that determines which topics to exclude.", "^$")
-		groupFilter       = toFlagString("group.filter", "Regex that determines which consumer groups to collect.", ".*")
-		groupExclude      = toFlagString("group.exclude", "Regex that determines which consumer groups to exclude.", "^$")
-		groupTopicFilter  = toFlagString("group-topic.filter", "Regex that determines consumer groups to collect based on topics they consume.", ".*")
-		groupTopicExclude = toFlagString("group-topic.exclude", "Regex that determines consumer groups to exclude based on topics they consume.", "^$")
-		logSarama         = toFlagBool("log.enable-sarama", "Turn on Sarama logging, default is false.", false, "false")
+		listenAddress = toFlagString("web.listen-address", "Address to listen on for web interface and telemetry.", ":9308")
+		metricsPath   = toFlagString("web.telemetry-path", "Path under which to expose metrics.", "/metrics")
+		topicFilter   = toFlagString("topic.filter", "Regex that determines which topics to collect.", ".*")
+		topicExclude  = toFlagString("topic.exclude", "Regex that determines which topics to exclude.", "^$")
+		groupFilter   = toFlagString("group.filter", "Regex that determines which consumer groups to collect.", ".*")
+		groupExclude  = toFlagString("group.exclude", "Regex that determines which consumer groups to exclude.", "^$")
+		logSarama     = toFlagBool("log.enable-sarama", "Turn on Sarama logging, default is false.", false, "false")
 
 		opts = kafkaOpts{}
 	)
@@ -867,6 +865,8 @@ func main() {
 	toFlagBoolVar("kafka.allow-auto-topic-creation", "If true, the broker may auto-create topics that we requested which do not already exist, default is false.", false, "false", &opts.allowAutoTopicCreation)
 	toFlagIntVar("verbosity", "Verbosity log level", 0, "0", &opts.verbosityLogLevel)
 	toFlagBoolVar("skip.empty-consumer-groups", "If true, do not scrape consumer groups that are empty or not connected to any topics, default is true", true, "true", &opts.skipEmptyConsumerGroups)
+	toFlagStringVar("group-topic.filter", "Regex that determines consumer groups to collect based on topics they consume.", ".*", &opts.groupTopicFilter)
+	toFlagStringVar("group-topic.exclude", "Regex that determines consumer groups to exclude based on topics they consume.", "^$", &opts.groupTopicExclude)
 
 	plConfig := plog.Config{}
 	plogflag.AddFlags(kingpin.CommandLine, &plConfig)
@@ -886,7 +886,7 @@ func main() {
 		}
 	}
 
-	setup(*listenAddress, *metricsPath, *topicFilter, *topicExclude, *groupFilter, *groupExclude, *groupTopicFilter, *groupTopicExclude, *logSarama, opts, labels)
+	setup(*listenAddress, *metricsPath, *topicFilter, *topicExclude, *groupFilter, *groupExclude, opts.groupTopicFilter, opts.groupTopicExclude, *logSarama, opts, labels)
 }
 
 func setup(
