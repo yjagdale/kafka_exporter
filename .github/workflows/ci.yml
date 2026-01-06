@@ -11,6 +11,7 @@ jobs:
     env:
       GOPATH: ${{ github.workspace }}
       GO111MODULE: on
+      DOCKER_REGISTRY: databahndockerhub
     defaults:
       run:
         working-directory: ${{ env.GOPATH }}/src/github.com/${{ github.repository }}
