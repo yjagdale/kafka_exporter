@@ -59,7 +59,7 @@ push: crossbuild
 	@echo ">> building and pushing multi-arch docker images, $(DOCKER_USERNAME),$(DOCKER_IMAGE_NAME),$(GIT_TAG_NAME)"
 	@docker login -u $(DOCKER_USERNAME) -p $(DOCKER_PASSWORD)
 	@docker buildx create --use
-	@docker buildx build -t "$(DOCKER_USERNAME)/$(DOCKER_IMAGE_NAME):$(GIT_TAG_NAME)" \
+	@docker buildx build -t "$(DOCKER_REGISTRY)/$(DOCKER_IMAGE_NAME):$(GIT_TAG_NAME)" \
 		--output "$(PUSHTAG)" \
 		--platform "$(DOCKER_PLATFORMS)" \
 		.
