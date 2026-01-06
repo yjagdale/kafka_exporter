@@ -20,7 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Reduces metric cardinality by 50-80% on typical clusters
   - To restore previous behavior, use `--no-skip.empty-consumer-groups`
 
-## [1.9.0] - Previous Release
+## 1.9.0 / 2024-01-01
 
 ### Features
 - Support for Kafka 2.0+
@@ -34,7 +34,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ZooKeeper lag support (legacy)
 - Prometheus metrics exposition
 - Grafana dashboard support
-
-[Unreleased]: https://github.com/danielqsj/kafka_exporter/compare/v1.9.0...HEAD
-[1.9.0]: https://github.com/danielqsj/kafka_exporter/releases/tag/v1.9.0
 
