@@ -394,6 +394,11 @@ func (e *Exporter) collectChans(quit chan struct{}) {
 }
 
 func (e *Exporter) collect(ch chan<- prometheus.Metric) {
+	startedAt := time.Now()
+	defer func() {
+		klog.V(DEBUG).Infof("Finished metrics collection in %s", time.Since(startedAt))
+	}()
+
 	wg := sync.WaitGroup{}
 	ch <- prometheus.MustNewConstMetric(
 		clusterBrokers, prometheus.GaugeValue, float64(len(e.client.Brokers())),
@@ -716,29 +721,35 @@ func (e *Exporter) collect(ch chan<- prometheus.Metric) {
 					ch <- prometheus.MustNewConstMetric(
 						consumergroupCurrentOffset, prometheus.GaugeValue, float64(currentOffset), group.GroupId, topic, strconv.FormatInt(int64(partition), 10),
 					)
-					e.mu.Lock()
-					currentPartitionOffset, currentPartitionOffsetError := e.client.GetOffset(topic, partition, sarama.OffsetNewest)
-					if currentPartitionOffsetError != nil {
-						klog.Errorf("Cannot get current offset of topic %s partition %d: %v", topic, partition, currentPartitionOffsetError)
-					} else {
-						var lag int64
-						if offsetFetchResponseBlock.Offset == -1 {
-							lag = -1
-						} else {
-							if offset, ok := offset[topic][partition]; ok {
-								if currentPartitionOffset == -1 {
-									currentPartitionOffset = offset
-								}
-							}
-							lag = currentPartitionOffset - offsetFetchResponseBlock.Offset
-							lagSum += lag
-						}
 
-						ch <- prometheus.MustNewConstMetric(
-							consumergroupLag, prometheus.GaugeValue, float64(lag), group.GroupId, topic, strconv.FormatInt(int64(partition), 10),
-						)
+					currentPartitionOffset := int64(-1)
+					if topicOffsets, topicExists := offset[topic]; topicExists {
+						if cachedOffset, partitionExists := topicOffsets[partition]; partitionExists {
+							currentPartitionOffset = cachedOffset
+						}
 					}
-					e.mu.Unlock()
+
+					// Fallback only when topic/partition offset was not part of the topic metrics pass.
+					if currentPartitionOffset == -1 {
+						fetchedOffset, currentPartitionOffsetError := e.client.GetOffset(topic, partition, sarama.OffsetNewest)
+						if currentPartitionOffsetError != nil {
+							klog.Errorf("Cannot get current offset of topic %s partition %d: %v", topic, partition, currentPartitionOffsetError)
+						} else {
+							currentPartitionOffset = fetchedOffset
+						}
+					}
+
+					var lag int64
+					if offsetFetchResponseBlock.Offset == -1 || currentPartitionOffset == -1 {
+						lag = -1
+					} else {
+						lag = currentPartitionOffset - offsetFetchResponseBlock.Offset
+						lagSum += lag
+					}
+
+					ch <- prometheus.MustNewConstMetric(
+						consumergroupLag, prometheus.GaugeValue, float64(lag), group.GroupId, topic, strconv.FormatInt(int64(partition), 10),
+					)
 				}
 				ch <- prometheus.MustNewConstMetric(
 					consumergroupCurrentOffsetSum, prometheus.GaugeValue, float64(currentOffsetSum), group.GroupId, topic,
